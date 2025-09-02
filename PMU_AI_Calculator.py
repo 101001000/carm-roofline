@@ -17,7 +17,7 @@ if not hasattr(time, 'time_ns'):
 read_files = set()
 
 #Run PAPI with provided application
-def runPAPI(executable_path, debug, additional_args=None):
+def runPAPI(executable_path, debug, additional_args=None, fpratio=None):
     additional_args = additional_args or []
     #Construct the command with the provided paths and additional arguments
     command = [executable_path, *additional_args]
@@ -25,52 +25,102 @@ def runPAPI(executable_path, debug, additional_args=None):
     PAPI_output_folder = "carm_pmu_output"
     os.environ["PAPI_OUTPUT_DIRECTORY"] = PAPI_output_folder
 
-    #Setup environment to test Memory Operations
-    PAPI_Event = "PAPI_LST_INS"
-    os.environ["PAPI_EVENTS"] = PAPI_Event
+    if platform.machine() == "riscv64":
+        #Setup environment to test LD Memory Operations
+        PAPI_Event = "PAPI_LD_INS"
+        os.environ["PAPI_EVENTS"] = PAPI_Event
 
-    print("\n------------------------------")
-    print("Running Provided Application For Memory Instructions PMU Data\n")
-    try:
-        subprocess.run(command, check=True)
-    except subprocess.CalledProcessError as e:
-        print("Error executing the command:", e)
+        print("\n------------------------------")
+        print("Running Provided Application For LD Memory Instructions PMU Data\n")
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as e:
+            print("Error executing the command:", e)
+        
+        total_real_time_nsec_ld, total_papi_ld_ins, thread_count = analysePAPI(PAPI_Event)
+
+
+        #Modify environment to test SR Memory Operations
+        PAPI_Event = "PAPI_SR_INS"
+        os.environ["PAPI_EVENTS"] = PAPI_Event
+        print("------------------------------")
+        print("Running Provided Application For SR Memory Instructions PMU Data\n")
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as e:
+            print("Error executing the command:", e)
+        
+        total_real_time_nsec_sr, total_papi_sr_ins, thread_count = analysePAPI(PAPI_Event)
+
+        #Modify environment to test FP Operations
+        PAPI_Event = "PAPI_FP_INS"
+        os.environ["PAPI_EVENTS"] = PAPI_Event
+
+        print("------------------------------")
+        print("Running Provided Application For FP Instructions PMU Data\n")
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as e:
+            print("Error executing the command:", e)
+        
+        total_real_time_nsec_fp, total_papi_fp_ins, thread_count = analysePAPI(PAPI_Event)
+
+        #Remove intermediate output when not in debug mode
+        if not debug:
+            if os.path.isdir(PAPI_output_folder):
+                shutil.rmtree(PAPI_output_folder)
+            else:
+                print(f"Warning: Directory {PAPI_output_folder} does not exist, something went wrong")
+
+        return float((total_real_time_nsec_ld + total_real_time_nsec_sr + total_real_time_nsec_fp)/3), (total_papi_ld_ins + total_papi_sr_ins), total_papi_fp_ins * fpratio, total_papi_fp_ins / fpratio, thread_count
     
-    total_real_time_nsec_mem, total_papi_mem_ins, thread_count = analysePAPI(PAPI_Event)
+    else:
+        #Setup environment to test Memory Operations
+        PAPI_Event = "PAPI_LST_INS"
+        os.environ["PAPI_EVENTS"] = PAPI_Event
 
-    #Modify environment to test SP FP Operations
-    PAPI_Event = "PAPI_SP_OPS"
-    os.environ["PAPI_EVENTS"] = PAPI_Event
-    print("------------------------------")
-    print("Running Provided Application For SP FP Operations PMU Data\n")
-    try:
-        subprocess.run(command, check=True)
-    except subprocess.CalledProcessError as e:
-        print("Error executing the command:", e)
-    
-    total_real_time_nsec_sp, total_papi_sp_ops, thread_count = analysePAPI(PAPI_Event)
+        print("\n------------------------------")
+        print("Running Provided Application For Memory Instructions PMU Data\n")
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as e:
+            print("Error executing the command:", e)
+        
+        total_real_time_nsec_mem, total_papi_mem_ins, thread_count = analysePAPI(PAPI_Event)
 
-    #Modify environment to test DP FP Operations
-    PAPI_Event = "PAPI_DP_OPS"
-    os.environ["PAPI_EVENTS"] = PAPI_Event
+        #Modify environment to test SP FP Operations
+        PAPI_Event = "PAPI_SP_OPS"
+        os.environ["PAPI_EVENTS"] = PAPI_Event
+        print("------------------------------")
+        print("Running Provided Application For SP FP Operations PMU Data\n")
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as e:
+            print("Error executing the command:", e)
+        
+        total_real_time_nsec_sp, total_papi_sp_ops, thread_count = analysePAPI(PAPI_Event)
 
-    print("------------------------------")
-    print("Running Provided Application For DP FP Operations PMU Data\n")
-    try:
-        subprocess.run(command, check=True)
-    except subprocess.CalledProcessError as e:
-        print("Error executing the command:", e)
-    
-    total_real_time_nsec_dp, total_papi_dp_ops, thread_count = analysePAPI(PAPI_Event)
+        #Modify environment to test DP FP Operations
+        PAPI_Event = "PAPI_DP_OPS"
+        os.environ["PAPI_EVENTS"] = PAPI_Event
 
-    #Remove intermediate output when not in debug mode
-    if not debug:
-        if os.path.isdir(PAPI_output_folder):
-            shutil.rmtree(PAPI_output_folder)
-        else:
-            print(f"Warning: Directory {PAPI_output_folder} does not exist, something went wrong")
+        print("------------------------------")
+        print("Running Provided Application For DP FP Operations PMU Data\n")
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as e:
+            print("Error executing the command:", e)
+        
+        total_real_time_nsec_dp, total_papi_dp_ops, thread_count = analysePAPI(PAPI_Event)
 
-    return float((total_real_time_nsec_mem + total_real_time_nsec_sp + total_real_time_nsec_dp)/3), total_papi_mem_ins, total_papi_sp_ops, total_papi_dp_ops, thread_count
+        #Remove intermediate output when not in debug mode
+        if not debug:
+            if os.path.isdir(PAPI_output_folder):
+                shutil.rmtree(PAPI_output_folder)
+            else:
+                print(f"Warning: Directory {PAPI_output_folder} does not exist, something went wrong")
+
+        return float((total_real_time_nsec_mem + total_real_time_nsec_sp + total_real_time_nsec_dp)/3), total_papi_mem_ins, total_papi_sp_ops, total_papi_dp_ops, thread_count
     
 
 def analysePAPI(PAPI_Event):
@@ -139,16 +189,22 @@ if __name__ == "__main__":
     parser.add_argument('-n','--name', default='unnamed', nargs='?', type = str, help='Name for the machine running the app. (Default: unnamed)')
     parser.add_argument('-an','--app_name', default='', nargs='?', type = str, help='Name for the app.')
     parser.add_argument('--isa', default='', nargs='?', choices=['avx512', 'avx', 'avx2', 'sse', 'scalar', 'neon', 'armscalar', 'riscvscalar', 'riscvvector', ''], help='Main ISA used by the application, if not sure leave blank (optional only for naming facilitation).')    
+    parser.add_argument('-fpr', '--fpratio', default='None', nargs='?', help='Ratio of single-precision to double-precision operations. Required for the RISC-V PMU and only supported on these machines.')    
+
 
     args = parser.parse_args()
 
     CPU_Type = platform.machine()
-    if CPU_Type != "x86_64" and CPU_Type != "aarch64":
-        print("No PMU analysis support on non x86 / ARM CPUS.")
+    if CPU_Type != "x86_64" and CPU_Type != "aarch64" and CPU_Type != "riscv64":
+        print("No PMU analysis support on non x86 / ARM / RISC-V CPUS.")
         sys.exit(1)
 
+    if CPU_Type == "riscv64" and args.fpratio == 'None':
+        args.fpratio = 1
+        print("Warning: no floating-point ratio was defined. RISC-V PMUs do not provide an automatic way to calculate it, so a default 1:1 ratio is used. This will give incorrect results unless you define it properly with the --fpratio option.")
 
-    total_time_nsec, total_mem, total_sp, total_dp, thread_count = runPAPI(args.executable_path, args.debug, args.additional_args)
+
+    total_time_nsec, total_mem, total_sp, total_dp, thread_count = runPAPI(args.executable_path, args.debug, args.additional_args, args.fpratio)
 
     time_taken_seconds = float (total_time_nsec / 1e9)
 
